@@ -6,6 +6,10 @@
 # run once a week, and pull up to 60 days (data available could vary by IP). api will tell us the data start date in the report
 # still playing with minimum days of data requirements to limit IPs that are run through the model
 
+##load libraries required
+library(plyr)
+library(reshape2)
+
 hive.connect <- function(){
   library('RODBC')
   hive <- odbcConnect("Hive")
@@ -22,6 +26,8 @@ drv <- dbDriver("Oracle")
 sqlQuery(hive, "set hive.exec.reducers.max=50")
 sqlQuery(hive, "set hive.auto.convert.join=true")
 
+
+# AS Comment:  You should update this code to use Oracle wallet
 
 prod1 <- dbConnect(drv, dbname = "PROD1", username = "db_reports", password = "kyvg9_RmDN")
 # prod3 connection not working
@@ -122,14 +128,17 @@ hive_noncert_metrics$traps <- as.numeric(hive_noncert_metrics$traps)
 ## we only want days where there's data for both data sets (inner join). 
 ## do the day counts and percent_time_compliant after the join
 
+### AS Comment -- I wouldn't hard code column numbers, rather reference their variable names.
+######Which brings me to my next question, what is column 23 supposed to be?  It's 17 now.
+######Also, missing the loading of plyr library for rename statement to work.  I recommend loading all libraries at the beginning.
 
-oracle_metrics <- referrals[, c(1, 2, 3, 4, 5, 23)] 
+oracle_metrics <- referrals[, c("REPORT_DT", "IP_ADDRESS", "GROUP_NAME", "CATEGORY", "LIST_ID","complt_num")] 
 oracle_metrics<- unique(oracle_metrics)
 oracle_metrics <- rename(oracle_metrics, c("REPORT_DT" = "day", "IP_ADDRESS" = "ip_address"))
 prospects <- merge(oracle_metrics, hive_noncert_metrics, by = c("ip_address", "day"))
 
 length(unique(hive_noncert_metrics$ip_address))
-length(unique(referrals_sub$ip_address))
+#This line didn't work for me as there is no data frame with this name # length(unique(referrals_sub$ip_address))
 length(unique(prospects$ip_address))
 
 
@@ -137,22 +146,24 @@ length(unique(prospects$ip_address))
 #####################################################################
 ## Do some day counts to determine which ips have enough data to run through the model 
 
+##AS Comment:  You can simplify the code below to use the which() function instead of a new line to subset
+##Also, I'm a little confused here.. you want to use the data where complt_num >= 0 -- wouldn't that be everything?
 
-library(plyr)
-compliance_days <- subset(prospects, complt_num >= 0)
-compliance_days <- ddply(compliance_days, c("ip_address", "GROUP_NAME", "CATEGORY", "LIST_ID"), summarize, 
+
+#compliance_days <- subset(prospects, complt_num >= 0)
+compliance_days <- ddply(prospects[which(prospects$complt_num >= 0),], c("ip_address", "GROUP_NAME", "CATEGORY", "LIST_ID"), summarize, 
                          total_oracle_days = length(unique(day)),
                          complt_days = sum(complt_num, na.rm=TRUE))
 
 compliance_days$pct_days_complt<- compliance_days$complt_days / compliance_days$total_oracle_days
 
 
-yahoo_days<- subset(prospects, yahoo_volume >0)
-yahoo_days <- ddply(yahoo_days, c("ip_address", "GROUP_NAME", "CATEGORY", "LIST_ID"), summarize,
+#yahoo_days<- subset(prospects, yahoo_volume >0)
+yahoo_days <- ddply(prospects[which(prospects$yahoo_volume > 0),], c("ip_address", "GROUP_NAME", "CATEGORY", "LIST_ID"), summarize,
                     yahoo_days = length(unique(day)))
 
-hotmail_days<- subset(prospects, hotmail_volume >0)
-hotmail_days <- ddply(hotmail_days, c("ip_address", "GROUP_NAME", "CATEGORY", "LIST_ID"), summarize,
+#hotmail_days<- subset(prospects, hotmail_volume >0)
+hotmail_days <- ddply(prospects[which(prospects$hotmail_volume > 0),], c("ip_address", "GROUP_NAME", "CATEGORY", "LIST_ID"), summarize,
                       hotmail_days = length(unique(day)))                              
 
 total_hive_days <- ddply(prospects, c("ip_address", "GROUP_NAME", "CATEGORY", "LIST_ID"), summarize,
@@ -190,7 +201,11 @@ length(unique(prospects_df$ip_address))
 ###########################################################################3
 ## roll up ip-level for model 
 
-prospects_ip <- prospects_df[,c(-2, -3, -4)]
+##AS Comment:  Again, harcoding columns by column number can make you run into problems should
+### some other data issue cause your columns to become out of order
+
+prospects_ip <- prospects_df[ , -which(names(prospects_df) %in% c("GROUP_NAME","CATEGORY","LIST_ID"))]
+#or you can use this subset(prospects_df, select=-c("GROUP_NAME","CATEGORY","LIST_ID"))
 prospects_ip <- unique(prospects_ip)
 prospects_ip <- ddply(prospects_ip, c("ip_address", "pct_days_complt"), summarize,
                       avg_score = mean(score, na.rm = TRUE),
@@ -224,7 +239,8 @@ ideal_ip <- data.frame(
   avg_ipr = .8
 )
 
-ipvsideal <- rbind(ideal, prospects_ip)
+##AS Comment: minor naming issues here-- has ideal instead of ideal_ip
+ipvsideal <- rbind(ideal_ip, prospects_ip)
 
 
 
@@ -259,7 +275,10 @@ cos_sim <- function(df) {
 ipvsideal$prospecting_score_ip <- cos_sim(ipvsideal)
 
 ## Bring client info back in 
-client_info <- prospects_df[,c(1, 2, 3, 4)]
+
+##AS Comment:  Again, don't do the hard coding of indices to reference columns.
+
+client_info <- prospects_df[,c("ip_address","GROUP_NAME","CATEGORY","LIST_ID")]
 client_info<- unique(client_info)
 prospect_ranking <- merge(client_info, ipvsideal, by = c("ip_address"), all.x=TRUE)
 prospect_ranking <- prospect_ranking[with(prospect_ranking, order(-prospecting_score_ip)), ]
@@ -270,37 +289,50 @@ prospect_ranking <- prospect_ranking[with(prospect_ranking, order(-prospecting_s
 ##################### optional: flag the ips for use in group score ###########################
 ## Might just take this flagging out. it looks like avg_ip_score works just fine 
 
-primeips <- subset(prospect_ranking, prospecting_score_ip >.5)
-primeips <- subset(primeips, pct_days_complt >.8)
-primeips <- subset(primeips, avg_ipr > .5)
-primeips <- subset(primeips, avg_ipr < .95)
-primeips <- subset(primeips, avg_vol >10000)
-length(unique(primeips$ip_address))
 
-primeips$prime_flag<- 1
-primeips<- primeips[,c(1,14)]
-primeips <- unique(primeips)
+##AS Comment:  Why did you opt to do it this way?  I would have done an ifelse()
 
-decentips <- subset(prospect_ranking, prospecting_score_ip >0)
-decentips <- subset(decentips, pct_days_complt >.5)
-decentips <- subset(decentips, avg_ipr > .5)
-decentips <- subset(decentips, avg_ipr < .95)
-#decentips <- subset(decentips, avg_vol >10000)
+# primeips <- subset(prospect_ranking, prospecting_score_ip >.5)
+# primeips <- subset(primeips, pct_days_complt >.8)
+# primeips <- subset(primeips, avg_ipr > .5)
+# primeips <- subset(primeips, avg_ipr < .95)
+# primeips <- subset(primeips, avg_vol >10000)
+# length(unique(primeips$ip_address))
+
+
+prospect_ranking$prime_flag<- ifelse((prospect_ranking$prospecting_score > 0.5
+                                      & prospect_ranking$pct_days_complt > 0.8
+                                      & prospect_ranking$avg_ipr > 0.5 
+                                      & prospect_ranking$avg_ipr < 0.95
+                                      & prospect_ranking$avg_vol > 10000),1,0)
+# primeips<- primeips[,c(1,14)]
+# primeips <- unique(primeips)
+
+# decentips <- subset(prospect_ranking, prospecting_score_ip >0)
+# decentips <- subset(decentips, pct_days_complt >.5)
+# decentips <- subset(decentips, avg_ipr > .5)
+# decentips <- subset(decentips, avg_ipr < .95)
+##decentips <- subset(decentips, avg_vol >10000)
 length(unique(decentips$ip_address))
 
-decentips$decent_flag<- 1
-decentips<- decentips[,c(1,14)]
-decentips <- unique(decentips)
-
-prospect_ranking<- merge(prospect_ranking, primeips, by = "ip_address", all.x=TRUE)
-prospect_ranking<- merge(prospect_ranking, decentips, by = "ip_address", all.x=TRUE)
-
-prospect_ranking$prime_flag[is.na(prospect_ranking$prime_flag)] <- 0 
-prospect_ranking$decent_flag[is.na(prospect_ranking$decent_flag)] <- 0 
+prospect_ranking$decent_flag<- ifelse((prospect_ranking$prospecting_score > 0
+                                       & prospect_ranking$pct_days_complt > 0.5
+                                       & prospect_ranking$avg_ipr > 0.5 
+                                       & prospect_ranking$avg_ipr < 0.95),1,0)
+# decentips<- decentips[,c(1,14)]
+# decentips <- unique(decentips)
+# 
+# prospect_ranking<- merge(prospect_ranking, primeips, by = "ip_address", all.x=TRUE)
+# prospect_ranking<- merge(prospect_ranking, decentips, by = "ip_address", all.x=TRUE)
+# 
+#AS Comment:  I don't think you need to do this anymore, there are no NAs using the ifelse() statement.
+# prospect_ranking$prime_flag[is.na(prospect_ranking$prime_flag)] <- 0 
+# prospect_ranking$decent_flag[is.na(prospect_ranking$decent_flag)] <- 0 
 
 prospect_ranking$flags<- prospect_ranking$prime_flag + prospect_ranking$decent_flag
 
-ip_flags<- prospect_ranking[,c(1, 13, 16)]
+##AS Comment: Same as before :-)
+ip_flags<- prospect_ranking[,c("ip_address", "prospecting_score_ip", "flags")]
 ip_flags<- unique(ip_flags)
 
 
@@ -313,7 +345,9 @@ prospects_group<- merge(prospects_df, ip_flags, by = "ip_address", all.x=TRUE)
 ################################################
 ## roll up group-level for model (could choose to take out avg_flags)
 
-ipscores<- prospect_ranking[,c(1, 13)]
+#AS Comment:  Same thing :-)
+
+ipscores<- prospect_ranking[,c("ip_address", "prospecting_score_ip")]
 ipscores<- unique(ipscores)
 
 prospects_group<- merge(prospects_df, ipscores, by = "ip_address", all.x=TRUE)
@@ -337,7 +371,8 @@ prospects_group$avg_bounce[is.na(prospects_group$avg_bounce)] <- 0
 prospects_group$avg_traps[is.na(prospects_group$avg_traps)] <- 0 
 
 ##Only run for actual groups with more than one ip
-prospects_group <- subset (prospects_group, ip_count > 1)
+##AS Comment: Small typo, removed a space between subset and the (
+prospects_group <- subset(prospects_group, ip_count > 1)
 
 #########################################
 ## create the "ideal" group and attach it to the group prepped data
@@ -372,19 +407,27 @@ groupvsideal <- groupvsideal[with(groupvsideal, order(-prospecting_score_group))
 
 ### Either stop here with two dataframes: groupvsideal and prospect_ranking, or combine into one dataframe:
 
+##AS Comment: Another area that I would suggest not using column indices but names instead, only because if one variable
+####somehow gets shifted around, it ends up not working.
 
 resultsa<- prospect_ranking#[,c(-14, -15)]
 resultsa$ip_count <- 1
 resultsa$avg_ip_score<- NA
 resultsa <- rename(resultsa, c("prospecting_score_ip" = "prospecting_score"))
 #"flags" = "prime_indicator"))
-resultsa <- resultsa[,c(1, 2, 3, 4, 14, 13, 15, 5, 6, 7, 8, 9, 10, 11, 12)]
+resultsa <- resultsa[,c("ip_address","GROUP_NAME","CATEGORY","LIST_ID", "prime_flag", "prospecting_score", 
+                        "decent_flag",  "pct_days_complt","avg_score", "avg_traps" , "avg_bounce","avg_comp",
+                        "avg_srd", "avg_vol", "avg_ipr")]
 
 resultsb<- groupvsideal
 resultsb$ip_address<- "Group Rollup"
 resultsb <- rename(resultsb, c("prospecting_score_group" = "prospecting_score"))
+
+##AS Comment: It seems like these column names should be the same as resultsa, but the group data.frame doesn't have the flags.
 resultsb <- resultsb[,c(15, 1, 2, 3, 4, 14, 6, 5, 7, 8, 9, 10, 11, 12, 13)]
 
+
+##AS Comment: You can't rbind these two dataframes because the group doesn't have the flags?
 results<- rbind(resultsa, resultsb)
 results <- results[with(results, order(LIST_ID, CATEGORY, ip_address, prospecting_score)), ]
 
