@@ -403,26 +403,30 @@ groupvsideal <- groupvsideal[with(groupvsideal, order(-prospecting_score_group))
 
 ### Either stop here with two dataframes: groupvsideal and prospect_ranking, or combine into one dataframe:
 
+##AS Comment: Another area that I would suggest not using column indices but names instead, only because if one variable
+####somehow gets shifted around, it ends up not working.
 
 resultsa<- prospect_ranking#[,c(-14, -15)]
 resultsa$ip_count <- 1
 resultsa$avg_ip_score<- NA
 resultsa <- rename(resultsa, c("prospecting_score_ip" = "prospecting_score"))
 #"flags" = "prime_indicator"))
-resultsa <- resultsa[,c(1, 2, 3, 4, 14, 13, 15, 5, 6, 7, 8, 9, 10, 11, 12)]
+resultsa <- resultsa[,c("ip_address","GROUP_NAME","CATEGORY","LIST_ID", "prime_flag", "prospecting_score", 
+                        "decent_flag",  "pct_days_complt","avg_score", "avg_traps" , "avg_bounce","avg_comp",
+                        "avg_srd", "avg_vol", "avg_ipr")]
 
 resultsb<- groupvsideal
 resultsb$ip_address<- "Group Rollup"
 resultsb <- rename(resultsb, c("prospecting_score_group" = "prospecting_score"))
+
+##AS Comment: It seems like these column names should be the same as resultsa, but the group data.frame doesn't have the flags.
 resultsb <- resultsb[,c(15, 1, 2, 3, 4, 14, 6, 5, 7, 8, 9, 10, 11, 12, 13)]
 
+##AS Comment: You can't rbind these two dataframes because the group doesn't have the flags?
 results<- rbind(resultsa, resultsb)
 results <- results[with(results, order(LIST_ID, CATEGORY, ip_address, prospecting_score)), ]
 
 results$prospecting_score_scaled<- ifelse(results$prospecting_score <0, 0, (round((results$prospecting_score*10), digits = 0)/2))
-
-
-
 
 
 
