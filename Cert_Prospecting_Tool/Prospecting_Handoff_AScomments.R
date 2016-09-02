@@ -452,16 +452,18 @@ results$prospecting_score_scaled<- ifelse(results$prospecting_score <0, 0, (roun
 
 #let's put the same 30 days of hotmail data requirement on hive_cert ips too
 
-hotmail_days_cert<- subset(hive_cert_metrics, hotmail_volume >0)
-hotmail_days_cert <- ddply(hotmail_days_cert, c("ip_address"), summarize,
+#AS Comment: This is another area I would use which instead of creating a subset dataset first.
+#hotmail_days_cert<- subset(hive_cert_metrics, hotmail_volume >0)
+hotmail_days_cert <- ddply(hotmail_cert_metrics[which(hotmail_cert_metrics$hotmail_volume > 0),], c("ip_address"), summarize,
                            hotmail_days = length(unique(day)))
 
-hotmail_days_cert<- subset(hotmail_days_cert, hotmail_days > 30)
-cert<- merge(hive_cert_metrics, hotmail_days_cert, by = "ip_address")
+#hotmail_days_cert<- subset(hotmail_days_cert, hotmail_days > 30)
+cert<- merge(hive_cert_metrics, hotmail_days_cert[which(hotmail_days_cert$hotmail_days >30),], by = "ip_address")
 
 
 # then we'll take the columns we need from hive_cert_metrics and prospects_df and rbind them together 
 
+#AS Comment:  Same thing as before around not hard coding indices, but column names instead
 cert<- cert[,c(1, 2, 3, 8, 11, 12, 15, 16, 17, 18)]
 noncert_prospects<- prospects_df[,c(1, 7, 5, 12, 15, 16, 19, 20, 21, 22 )]
 
@@ -539,6 +541,10 @@ avgdata2<- melt(avgdata, id.vars=c("ip_address", "cert_noncert", "avg_inbox"),
 ### Now we'll pull some stats on the profiles
 
 #first we find the average IPR for cert vs noncert in each profile, and use the difference to show an average inbox lift per profile
+
+#AS Comment:  This could be another area when you perform the operating on a subset of data using the which() functionality
+####instead of creating the subset dataframe first.  It's more of a way to make code appear shorter to the eye
+####but I can't speak to how much it would "speed up" code.
 
 certprofs <- subset(avgdata2, cert_noncert == 1)
 certprofs <- aggregate(avg_inbox~ value, certprofs, mean)
