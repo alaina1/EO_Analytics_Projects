@@ -454,7 +454,7 @@ results$prospecting_score_scaled<- ifelse(results$prospecting_score <0, 0, (roun
 
 #AS Comment: This is another area I would use which instead of creating a subset dataset first.
 #hotmail_days_cert<- subset(hive_cert_metrics, hotmail_volume >0)
-hotmail_days_cert <- ddply(hotmail_cert_metrics[which(hotmail_cert_metrics$hotmail_volume > 0),], c("ip_address"), summarize,
+hotmail_days_cert <- ddply(hive_cert_metrics[which(hotmail_cert_metrics$hotmail_volume > 0),], c("ip_address"), summarize,
                            hotmail_days = length(unique(day)))
 
 #hotmail_days_cert<- subset(hotmail_days_cert, hotmail_days > 30)
