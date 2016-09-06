@@ -454,7 +454,7 @@ results$prospecting_score_scaled<- ifelse(results$prospecting_score <0, 0, (roun
 
 #AS Comment: This is another area I would use which instead of creating a subset dataset first.
 #hotmail_days_cert<- subset(hive_cert_metrics, hotmail_volume >0)
-hotmail_days_cert <- ddply(hive_cert_metrics[which(hotmail_cert_metrics$hotmail_volume > 0),], c("ip_address"), summarize,
+hotmail_days_cert <- ddply(hive_cert_metrics[which(hive_cert_metrics$hotmail_volume > 0),], c("ip_address"), summarize,
                            hotmail_days = length(unique(day)))
 
 #hotmail_days_cert<- subset(hotmail_days_cert, hotmail_days > 30)
@@ -464,8 +464,10 @@ cert<- merge(hive_cert_metrics, hotmail_days_cert[which(hotmail_days_cert$hotmai
 # then we'll take the columns we need from hive_cert_metrics and prospects_df and rbind them together 
 
 #AS Comment:  Same thing as before around not hard coding indices, but column names instead
-cert<- cert[,c(1, 2, 3, 8, 11, 12, 15, 16, 17, 18)]
-noncert_prospects<- prospects_df[,c(1, 7, 5, 12, 15, 16, 19, 20, 21, 22 )]
+cert<- cert[,c("ip_address", "cert_noncert", "day", "srd_rate", "hotmail_volume", "hotmail_inbox_pct",
+               "score", "traps", "bounce_rate", "complaint_rate")]
+noncert_prospects<- prospects_df[,c("ip_address", "cert_noncert", "day", "srd_rate", "hotmail_volume", 
+                                    "yahoo_inbox_pct", "score", "traps", "bounce_rate", "complaint_rate" )]
 
 lift_df<- rbind(cert, noncert_prospects)
 
